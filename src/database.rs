@@ -76,7 +76,7 @@ pub struct FileRepository {}
 impl FileRepository {
     pub fn get_collection() -> Collection<FileDocument> {
         let client = DATABASE.get().expect("MongoDB client not initialized");
-        let db = client.database(&*MONGODB_DATABASE);
+        let db = client.database(&MONGODB_DATABASE);
         db.collection::<FileDocument>("files")
     }
 
@@ -133,7 +133,7 @@ pub struct Session {
 
 pub async fn get_session(token: &str) -> Result<Option<Session>> {
     let client = DATABASE.get().expect("MongoDB client not initialized");
-    let db = client.database(&*&AS_MONGODB_DATABASE);
+    let db = client.database(&AS_MONGODB_DATABASE);
     let collection = db.collection::<Session>("sessions");
     let result = collection.find_one(doc! { "token": token }).await?;
     Ok(result)

@@ -70,7 +70,7 @@ where
                     }
                 }
                 None => {
-                    Err(actix_web::error::ErrorUnauthorized("Authorization header required").into())
+                    Err(actix_web::error::ErrorUnauthorized("Authorization header required"))
                 }
             }
         })

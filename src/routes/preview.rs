@@ -69,24 +69,18 @@ pub async fn fetch_preview(url: &str) -> Result<LinkPreview> {
 fn extract_meta_content(document: &Html, properties: &[&str]) -> Option<String> {
     for property in properties {
         let selector_str = format!(r#"meta[property="{}"]"#, property);
-        if let Ok(selector) = Selector::parse(&selector_str) {
-            if let Some(element) = document.select(&selector).next() {
-                if let Some(content) = element.value().attr("content") {
-                    if !content.trim().is_empty() {
+        if let Ok(selector) = Selector::parse(&selector_str)
+            && let Some(element) = document.select(&selector).next() 
+                && let Some(content) = element.value().attr("content") 
+                    && !content.trim().is_empty() {
                         return Some(content.to_string());
-                    }
-                }
-            }
         }
         let selector_str = format!(r#"meta[name="{}"]"#, property);
-        if let Ok(selector) = Selector::parse(&selector_str) {
-            if let Some(element) = document.select(&selector).next() {
-                if let Some(content) = element.value().attr("content") {
-                    if !content.trim().is_empty() {
+        if let Ok(selector) = Selector::parse(&selector_str) 
+            && let Some(element) = document.select(&selector).next() 
+                && let Some(content) = element.value().attr("content") 
+                    && !content.trim().is_empty() {
                         return Some(content.to_string());
-                    }
-                }
-            }
         }
     }
     None
@@ -104,10 +98,9 @@ fn resolve_url(base: &str, relative: &str) -> String {
     if relative.starts_with("http://") || relative.starts_with("https://") {
         return relative.to_string();
     }
-    if let Ok(base_url) = url::Url::parse(base) {
-        if let Ok(resolved) = base_url.join(relative) {
+    if let Ok(base_url) = url::Url::parse(base) 
+        && let Ok(resolved) = base_url.join(relative) {
             return resolved.to_string();
-        }
     }
     relative.to_string()
 }

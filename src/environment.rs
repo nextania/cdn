@@ -2,7 +2,7 @@ use lazy_static::lazy_static;
 use s3::{Bucket, Region, creds::Credentials};
 
 lazy_static! {
-    pub static ref S3_REGION: String = std::env::var("S3_REGION").unwrap_or(String::new());
+    pub static ref S3_REGION: String = std::env::var("S3_REGION").unwrap_or_default();
     pub static ref S3_ENDPOINT: String = std::env::var("S3_ENDPOINT").expect("S3_ENDPOINT must be set");
     pub static ref S3_BUCKET_NAME: String = std::env::var("S3_BUCKET_NAME").expect("S3_BUCKET_NAME must be set");
     pub static ref S3_ACCESS_KEY: String = std::env::var("S3_ACCESS_KEY").expect("S3_ACCESS_KEY must be set");
@@ -21,9 +21,8 @@ lazy_static! {
             endpoint: S3_ENDPOINT.clone(),
         };
         
-        let bucket = *Bucket::new(&S3_BUCKET_NAME, region, credentials)
-            .expect("Failed to create S3 bucket");
-        bucket
+        *Bucket::new(&S3_BUCKET_NAME, region, credentials)
+            .expect("Failed to create S3 bucket")
     };
     
     pub static ref CLAMAV_HOST: String = std::env::var("CLAMAV_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
