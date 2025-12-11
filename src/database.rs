@@ -1,11 +1,17 @@
 use anyhow::Result;
 use futures_util::StreamExt;
 use log::error;
-use mongodb::{Client, Collection, bson::{DateTime, doc}};
+use mongodb::{
+    Client, Collection,
+    bson::{DateTime, doc},
+};
 use rand::{Rng, distr::Alphanumeric};
 use serde::{Deserialize, Serialize};
 
-use crate::{environment::{AS_MONGODB_DATABASE, FILE_TIMEOUT_HOURS, MONGODB_DATABASE}, get_time_millis};
+use crate::{
+    environment::{AS_MONGODB_DATABASE, FILE_TIMEOUT_HOURS, MONGODB_DATABASE},
+    get_time_millis,
+};
 
 use crate::environment::MONGODB_URI;
 
@@ -29,7 +35,7 @@ pub struct FileDocument {
     pub uploaded_at: DateTime,
     pub user_id: String,
     pub signing_key: String,
-    
+
     // This attribute should be set by other applications
     // If false for too long, the file will be deleted
     pub linked: bool,
@@ -48,13 +54,13 @@ impl FileDocument {
         content_type: String,
         size: u64,
         user_id: String,
-    ) -> Self {        
+    ) -> Self {
         let secret_key: String = rand::rng()
             .sample_iter(&Alphanumeric)
             .take(32)
             .map(char::from)
             .collect();
-        
+
         Self {
             id,
             name,
@@ -90,7 +96,7 @@ impl FileRepository {
         Ok(result)
     }
 
-    pub async fn find_expired_files() -> Result<Vec<FileDocument>> {        
+    pub async fn find_expired_files() -> Result<Vec<FileDocument>> {
         let cutoff_time = get_time_millis() as i64 - &*FILE_TIMEOUT_HOURS * 3600 * 1000;
         let cutoff = DateTime::from_millis(cutoff_time);
         let filter = doc! {

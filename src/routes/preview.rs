@@ -39,23 +39,15 @@ pub async fn fetch_preview(url: &str) -> Result<LinkPreview> {
         .context("Failed to read response body")?;
 
     let document = Html::parse_document(&html);
-    let title = extract_meta_content(&document, &[
-        "og:title",
-        "twitter:title",
-    ]).or_else(|| extract_title(&document));
-    let description = extract_meta_content(&document, &[
-        "og:description",
-        "twitter:description",
-        "description",
-    ]);
-    let image = extract_meta_content(&document, &[
-        "og:image",
-        "twitter:image",
-    ]).map(|img| resolve_url(url, &img));
-    let site_name = extract_meta_content(&document, &[
-        "og:site_name",
-        "twitter:site",
-    ]);
+    let title = extract_meta_content(&document, &["og:title", "twitter:title"])
+        .or_else(|| extract_title(&document));
+    let description = extract_meta_content(
+        &document,
+        &["og:description", "twitter:description", "description"],
+    );
+    let image = extract_meta_content(&document, &["og:image", "twitter:image"])
+        .map(|img| resolve_url(url, &img));
+    let site_name = extract_meta_content(&document, &["og:site_name", "twitter:site"]);
 
     Ok(LinkPreview {
         url: url.to_string(),
@@ -70,17 +62,19 @@ fn extract_meta_content(document: &Html, properties: &[&str]) -> Option<String> 
     for property in properties {
         let selector_str = format!(r#"meta[property="{}"]"#, property);
         if let Ok(selector) = Selector::parse(&selector_str)
-            && let Some(element) = document.select(&selector).next() 
-                && let Some(content) = element.value().attr("content") 
-                    && !content.trim().is_empty() {
-                        return Some(content.to_string());
+            && let Some(element) = document.select(&selector).next()
+            && let Some(content) = element.value().attr("content")
+            && !content.trim().is_empty()
+        {
+            return Some(content.to_string());
         }
         let selector_str = format!(r#"meta[name="{}"]"#, property);
-        if let Ok(selector) = Selector::parse(&selector_str) 
-            && let Some(element) = document.select(&selector).next() 
-                && let Some(content) = element.value().attr("content") 
-                    && !content.trim().is_empty() {
-                        return Some(content.to_string());
+        if let Ok(selector) = Selector::parse(&selector_str)
+            && let Some(element) = document.select(&selector).next()
+            && let Some(content) = element.value().attr("content")
+            && !content.trim().is_empty()
+        {
+            return Some(content.to_string());
         }
     }
     None
@@ -98,13 +92,13 @@ fn resolve_url(base: &str, relative: &str) -> String {
     if relative.starts_with("http://") || relative.starts_with("https://") {
         return relative.to_string();
     }
-    if let Ok(base_url) = url::Url::parse(base) 
-        && let Ok(resolved) = base_url.join(relative) {
-            return resolved.to_string();
+    if let Ok(base_url) = url::Url::parse(base)
+        && let Ok(resolved) = base_url.join(relative)
+    {
+        return resolved.to_string();
     }
     relative.to_string()
 }
-
 
 #[derive(Deserialize)]
 pub struct LinkPreviewQuery {

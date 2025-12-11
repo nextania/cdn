@@ -1,18 +1,14 @@
-use actix_web::{HttpResponse, web, Result as ActixResult};
+use actix_web::{HttpResponse, Result as ActixResult, web};
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use image::{imageops::FilterType, GenericImageView, ImageFormat};
+use image::{GenericImageView, ImageFormat, imageops::FilterType};
 use log::{debug, error, info};
 use serde::Deserialize;
 use std::io::Cursor;
 
 use crate::{ErrorResponse, routes::preview::HTTP_CLIENT};
 
-pub async fn resize_from_url(
-    url: &str,
-    width: Option<u32>,
-    height: Option<u32>,
-) -> Result<Bytes> {
+pub async fn resize_from_url(url: &str, width: Option<u32>, height: Option<u32>) -> Result<Bytes> {
     let response = HTTP_CLIENT
         .get(url)
         .send()
@@ -22,32 +18,20 @@ pub async fn resize_from_url(
         .bytes()
         .await
         .context("Failed to read image bytes")?;
-    
+
     resize_bytes(image_bytes, width, height)
 }
 
-pub fn resize_bytes(
-    image_bytes: Bytes,
-    width: Option<u32>,
-    height: Option<u32>,
-) -> Result<Bytes> {
-    let img = image::load_from_memory(&image_bytes)
-        .context("Failed to decode image")?;
+pub fn resize_bytes(image_bytes: Bytes, width: Option<u32>, height: Option<u32>) -> Result<Bytes> {
+    let img = image::load_from_memory(&image_bytes).context("Failed to decode image")?;
     let (original_width, original_height) = img.dimensions();
     debug!(
         "Original image dimensions: {}x{}",
         original_width, original_height
     );
-    let (target_width, target_height) = calculate_dimensions(
-        original_width,
-        original_height,
-        width,
-        height,
-    );
-    debug!(
-        "Resizing to: {}x{}",
-        target_width, target_height
-    );
+    let (target_width, target_height) =
+        calculate_dimensions(original_width, original_height, width, height);
+    debug!("Resizing to: {}x{}", target_width, target_height);
     let resized = img.resize(target_width, target_height, FilterType::Lanczos3);
     let mut output = Cursor::new(Vec::new());
     resized
@@ -80,7 +64,6 @@ fn calculate_dimensions(
         (None, None) => (original_width, original_height),
     }
 }
-
 
 #[derive(Deserialize)]
 pub struct PreviewImageQuery {

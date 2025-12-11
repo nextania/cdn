@@ -1,9 +1,8 @@
-use actix_web::{HttpResponse, web, Result as ActixResult};
+use actix_web::{HttpResponse, Result as ActixResult, web};
 use log::{error, info, warn};
 use serde::Deserialize;
 
-use crate::{ErrorResponse, database::FileRepository, signature, environment::S3_BUCKET};
-
+use crate::{ErrorResponse, database::FileRepository, environment::S3_BUCKET, signature};
 
 #[derive(Deserialize)]
 pub struct FileServeQuery {
@@ -40,12 +39,20 @@ pub async fn serve_file(
     match S3_BUCKET.get_object(&file_doc.id).await {
         Ok(response) => {
             let bytes = response.bytes();
-            info!("File fetched successfully: {} ({} bytes)", file_id, bytes.len());
+            info!(
+                "File fetched successfully: {} ({} bytes)",
+                file_id,
+                bytes.len()
+            );
             Ok(HttpResponse::Ok()
                 .content_type(file_doc.content_type.as_str())
-                .insert_header(("Content-Disposition", 
-                    format!("inline; filename=\"{}\"", 
-                        file_doc.name.unwrap_or_else(|| file_doc.id.clone()))))
+                .insert_header((
+                    "Content-Disposition",
+                    format!(
+                        "inline; filename=\"{}\"",
+                        file_doc.name.unwrap_or_else(|| file_doc.id.clone())
+                    ),
+                ))
                 .body(bytes.to_vec()))
         }
         Err(e) => {

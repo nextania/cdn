@@ -1,10 +1,10 @@
 use actix_web::{
-    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
     Error, HttpMessage,
+    dev::{Service, ServiceRequest, ServiceResponse, Transform, forward_ready},
 };
 use futures_util::future::LocalBoxFuture;
 use log::info;
-use std::future::{ready, Ready};
+use std::future::{Ready, ready};
 
 use crate::database::get_session;
 
@@ -56,7 +56,7 @@ where
             match auth_header {
                 Some(token) => {
                     info!("Request with Authorization header");
-                    
+
                     match validate_token(&token).await {
                         Ok(user_id) => {
                             // Store user_id in extensions for use in handlers
@@ -64,14 +64,12 @@ where
                             req.request().extensions_mut().insert(user_id);
                             Ok(req)
                         }
-                        Err(e) => {
-                            Err(e)
-                        }
+                        Err(e) => Err(e),
                     }
                 }
-                None => {
-                    Err(actix_web::error::ErrorUnauthorized("Authorization header required"))
-                }
+                None => Err(actix_web::error::ErrorUnauthorized(
+                    "Authorization header required",
+                )),
             }
         })
     }
@@ -83,7 +81,9 @@ async fn validate_token(token: &str) -> Result<String, actix_web::Error> {
     })?;
     let session = match session {
         None => {
-            return Err(actix_web::error::ErrorUnauthorized("Invalid or expired token"));
+            return Err(actix_web::error::ErrorUnauthorized(
+                "Invalid or expired token",
+            ));
         }
         Some(s) => s,
     };
