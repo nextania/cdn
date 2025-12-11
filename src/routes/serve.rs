@@ -1,38 +1,58 @@
-use actix_web::web;
-use actix_web::{HttpResponse, Responder};
-use mongodb::bson::doc;
+use actix_web::{HttpResponse, web, Result as ActixResult};
+use log::{error, info, warn};
 use serde::Deserialize;
 
-use crate::constants::CACHE_CONTROL;
-use crate::errors::Result;
-use crate::files::File;
-use crate::stores::Store;
+use crate::{ErrorResponse, database::FileRepository, signature, environment::S3_BUCKET};
+
 
 #[derive(Deserialize)]
-pub struct Resize {
-    pub size: Option<isize>,
-    pub width: Option<isize>,
-    pub height: Option<isize>,
-    pub max_side: Option<isize>,
+pub struct FileServeQuery {
+    signature: String,
 }
 
-pub async fn handle(
-    path: web::Path<(String, String)>,
-    resize: web::Query<Resize>,
-) -> Result<impl Responder> {
-    let (store_id, id) = path.into_inner();
-    Store::get(&store_id)?;
-    let file = File::find(&id, &store_id).await?;
-    let (contents, content_type) = file.fetch(Some(resize.0)).await?;
-    let content_type = content_type.unwrap_or(file.content_type);
-    let disposition = match content_type.as_ref() {
-        "image/jpeg" | "image/png" | "image/gif" | "image/webp" | "video/mp4" | "video/webm"
-        | "video/webp" | "audio/quicktime" | "audio/mpeg" => "inline",
-        _ => "attachment",
+pub async fn serve_file(
+    path: web::Path<String>,
+    query: web::Query<FileServeQuery>,
+) -> ActixResult<HttpResponse> {
+    let file_id = path.into_inner();
+    info!("Serving file request for: {}", file_id);
+    let file_doc = match FileRepository::get_file(&file_id).await {
+        Ok(Some(doc)) => doc,
+        Ok(None) => {
+            error!("File not found: {}", file_id);
+            return Ok(HttpResponse::NotFound().json(ErrorResponse {
+                error: "File not found".to_string(),
+            }));
+        }
+        Err(e) => {
+            error!("MongoDB error: {}", e);
+            return Ok(HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Database error".to_string(),
+            }));
+        }
     };
-    Ok(HttpResponse::Ok()
-        .insert_header(("Content-Disposition", disposition))
-        .insert_header(("Cache-Control", CACHE_CONTROL))
-        .content_type(content_type)
-        .body(contents))
+    if !signature::verify_signature(&file_id, &file_doc.signing_key, &query.signature) {
+        warn!("Invalid signature for file: {}", file_id);
+        return Ok(HttpResponse::Forbidden().json(ErrorResponse {
+            error: "Invalid signature".to_string(),
+        }));
+    }
+    match S3_BUCKET.get_object(&file_doc.id).await {
+        Ok(response) => {
+            let bytes = response.bytes();
+            info!("File fetched successfully: {} ({} bytes)", file_id, bytes.len());
+            Ok(HttpResponse::Ok()
+                .content_type(file_doc.content_type.as_str())
+                .insert_header(("Content-Disposition", 
+                    format!("inline; filename=\"{}\"", 
+                        file_doc.name.unwrap_or_else(|| file_doc.id.clone()))))
+                .body(bytes.to_vec()))
+        }
+        Err(e) => {
+            error!("S3 fetch error for {}: {}", file_doc.id, e);
+            Ok(HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Failed to fetch file".to_string(),
+            }))
+        }
+    }
 }

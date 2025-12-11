@@ -1,124 +1,122 @@
-use std::convert::TryInto;
-use std::io::Write;
-
 use actix_multipart::Multipart;
-use actix_web::{web, Responder};
-use content_inspector::inspect;
-use futures::{StreamExt, TryStreamExt};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, Result as ActixResult};
+use bytes::Bytes;
+use futures_util::StreamExt;
+use log::{error, info, warn};
 use serde::Serialize;
-use tempfile::NamedTempFile;
+use ulid::Ulid;
 
-use crate::environment::{get_s3_bucket, LOCAL_STORAGE_PATH, USE_S3};
-use crate::errors::{Error, Result};
-use crate::files::{get_collection, File, FileMetadata};
-use crate::stores::{ContentType, Store};
-use crate::utilities::determine_video_size;
+use crate::{ErrorResponse, clamav, database::{FileDocument, FileRepository}, environment::S3_BUCKET, signature};
+
+pub const MAX_FILE_SIZE: u64 = 25 * 1024 * 1024; // 25MB in bytes
 
 #[derive(Serialize)]
 pub struct UploadResponse {
     id: String,
+    size: u64,
+    content_type: String,
+    signature: String,
+    serve_url: String,
 }
 
-pub async fn handle(path: web::Path<String>, mut payload: Multipart) -> Result<impl Responder> {
-    let store_id = path.into_inner();
-    let store = Store::get(&store_id)?;
-    if let Ok(Some(mut field)) = payload.try_next().await {
-        let content_type = field.content_disposition().unwrap();
-        let filename = content_type
-            .get_filename()
-            .ok_or(Error::InvalidData)?
-            .to_string();
-        let mut file_size: usize = 0;
-        let mut buf: Vec<u8> = Vec::new();
-        while let Some(chunk) = field.next().await {
-            let data = chunk.map_err(|_| Error::InvalidData)?;
-            file_size += data.len();
-            if file_size > store.max_size {
-                return Err(Error::FileTooLarge {
-                    max_size: store.max_size,
-                });
-            }
-            buf.append(&mut data.to_vec());
-        }
-        let content_type = tree_magic_mini::from_u8(&buf);
-        let metadata = match content_type {
-            "image/jpeg" | "image/png" | "image/gif" | "image/webp" => {
-                if let Ok(imagesize::ImageSize { width, height }) = imagesize::blob_size(&buf) {
-                    FileMetadata::Image {
-                        width: width.try_into().map_err(|_| Error::ProcessingError)?,
-                        height: height.try_into().map_err(|_| Error::ProcessingError)?,
-                    }
-                } else {
-                    FileMetadata::File
-                }
-            }
-            "video/mp4" | "video/webm" | "video/quicktime" => {
-                let mut tmp = NamedTempFile::new().map_err(|_| Error::ProcessingError)?;
-                tmp.write_all(&buf).map_err(|_| Error::ProcessingError)?;
-                if let Ok((width, height)) = determine_video_size(tmp.path()).await {
-                    FileMetadata::Video { width, height }
-                } else {
-                    FileMetadata::File
-                }
-            }
-            "audio/mpeg" => FileMetadata::Audio,
-            _ => {
-                if inspect(&buf).is_text() {
-                    FileMetadata::Text
-                } else {
-                    FileMetadata::File
-                }
-            }
-        };
-        if let Some(content_type) = &store.restrict_content_type {
-            if !matches!(
-                (content_type, &metadata),
-                (ContentType::Image, FileMetadata::Image { .. })
-                    | (ContentType::Video, FileMetadata::Video { .. })
-                    | (ContentType::Audio, FileMetadata::Audio)
-            ) {
-                return Err(Error::FileTypeNotAllowed);
-            }
-        }
-        let id = ulid::Ulid::new().to_string();
-        let file = File {
-            id: id.clone(),
-            store: store_id.clone(),
-            filename,
-            metadata,
-            content_type: content_type.to_string(),
-            size: buf.len() as isize,
-            deleted: false,
-            flagged: false,
-            attached: false,
-        };
-        get_collection()
-            .insert_one(&file)
-            .await
-            .map_err(|_| Error::DatabaseError)?;
-        if *USE_S3 {
-            let bucket = get_s3_bucket(&store_id)?;
-            let response = bucket
-                .put_object(format!("/{}", file.id), &buf)
-                .await
-                .map_err(|_| Error::StorageError)?;
-            if response.status_code() != 200 {
-                return Err(Error::StorageError);
-            }
-        } else {
-            let path = format!("{}/{}", *LOCAL_STORAGE_PATH, &file.id);
-            let mut f = web::block(|| std::fs::File::create(path))
-                .await
-                .map_err(|_| Error::StorageError)?
-                .map_err(|_| Error::StorageError)?;
+pub async fn upload_file(
+    req: HttpRequest,
+    mut payload: Multipart,
+) -> ActixResult<HttpResponse> {
+    info!("Received file upload request");
 
-            web::block(move || f.write_all(&buf))
-                .await
-                .map_err(|_| Error::StorageError)?
-                .map_err(|_| Error::StorageError)?;
+    // Get user_id from request extensions (set by auth middleware)
+    let user_id = req.extensions().get::<String>().cloned() 
+        .ok_or(actix_web::error::ErrorUnauthorized("User ID not found in request"))?;
+    
+    let mut file_data: Option<Bytes> = None;
+    let mut file_name: Option<String> = None;
+    let mut content_type: Option<String> = None;
+    
+    while let Some(item) = payload.next().await {
+        let mut field = item.map_err(|e| {
+            actix_web::error::ErrorBadRequest(format!("Multipart error: {}", e))
+        })?;
+        
+        let content_disposition = field.content_disposition();
+        let field_name = content_disposition.as_ref().and_then(|cd| cd.get_name());
+        
+        if field_name == Some("file") {
+            file_name = content_disposition.as_ref().and_then(|cd| cd.get_filename()).map(|s| s.to_string());
+            content_type = field.content_type().map(|ct| ct.to_string());
+            
+            let mut bytes = Vec::new();
+            while let Some(chunk) = field.next().await {
+                let data = chunk.map_err(|e| {
+                    actix_web::error::ErrorBadRequest(format!("Read error: {}", e))
+                })?;
+                bytes.extend_from_slice(&data);
+            }
+            file_data = Some(Bytes::from(bytes));
+            break;
         }
-        Ok(web::Json(UploadResponse { id }))
-    } else {
-        Err(Error::MissingData)
+    }
+    let file_data = file_data.ok_or_else(|| {
+        actix_web::error::ErrorBadRequest("No file provided")
+    })?;
+    let content_type = content_type.unwrap_or_else(|| "application/octet-stream".to_string());
+    let file_size = file_data.len() as u64;
+    if file_size > MAX_FILE_SIZE {
+        warn!("File size {} exceeds limit of {}", file_size, MAX_FILE_SIZE);
+        return Ok(HttpResponse::PayloadTooLarge().json(ErrorResponse {
+            error: format!("File size exceeds maximum allowed size of 25MB (received {} bytes)", file_size),
+        }));
+    }
+    
+    info!("Scanning file with ClamAV");
+    match clamav::scan_bytes(&file_data).await {
+        Ok(true) => info!("File is clean"),
+        Ok(false) => {
+            error!("File is infected");
+            return Ok(HttpResponse::BadRequest().json(ErrorResponse {
+                error: "File is infected with malware".to_string(),
+            }));
+        }
+        Err(e) => {
+            error!("ClamAV scan error: {}", e);
+            return Ok(HttpResponse::InternalServerError().json(ErrorResponse {
+                error: format!("Virus scan failed: {}", e),
+            }));
+        }
+    }
+    
+    let file_id = Ulid::new().to_string();
+    info!("Uploading file to S3: {}", file_id);
+    match S3_BUCKET.put_object_with_content_type(&file_id, &file_data, &content_type).await {
+        Ok(_) => {
+            info!("File uploaded successfully: {}", file_id);
+            let file_doc = FileDocument::new(
+                file_id.clone(),
+                file_name,
+                content_type.clone(),
+                file_size,
+                user_id.clone(),
+            );
+            let signature = signature::generate_signature(&file_id, &file_doc.signing_key);
+            let serve_url = format!("/files/{}?signature={}", file_id, signature);
+            if let Err(e) = FileRepository::insert_file(file_doc).await {
+                error!("Failed to save file metadata to MongoDB: {}", e);
+                // TODO: delete the file from S3 here to avoid orphaned files?
+                warn!("File {} uploaded to S3 but not tracked in MongoDB", file_id);
+            }
+            Ok(HttpResponse::Ok().json(UploadResponse {
+                id: file_id,
+                size: file_size,
+                content_type,
+                signature,
+                serve_url,
+            }))
+        }
+        Err(e) => {
+            error!("S3 upload error: {}", e);
+            Ok(HttpResponse::InternalServerError().json(ErrorResponse {
+                error: format!("Upload failed: {}", e),
+            }))
+        }
     }
 }

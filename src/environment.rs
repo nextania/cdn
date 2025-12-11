@@ -1,33 +1,44 @@
-use crate::errors::{Error, Result};
-
 use lazy_static::lazy_static;
-use s3::{creds::Credentials, Region};
-use std::env;
+use s3::{Bucket, Region, creds::Credentials};
 
 lazy_static! {
-    pub static ref STORES: String =
-        env::var("STORES").unwrap_or_else(|_| String::from("Stores.toml"));
-    pub static ref HOST: String = env::var("HOST").expect("Missing CDN_HOST environment variable");
-    pub static ref MONGODB_URI: String =
-        env::var("MONGODB_URI").expect("Missing CDN_MONGODB_URI environment variable");
-    pub static ref MONGODB_DATABASE: String =
-        env::var("MONGODB_DATABASE").unwrap_or_else(|_| "cdn".to_string());
-    pub static ref LOCAL_STORAGE_PATH: String =
-        env::var("LOCAL_STORAGE_PATH").unwrap_or_else(|_| "./files".to_string());
-    pub static ref S3_REGION: Region = Region::Custom {
-        region: env::var("S3_REGION").unwrap_or_else(|_| String::new()),
-        endpoint: env::var("S3_ENDPOINT").unwrap_or_else(|_| String::new())
+    pub static ref S3_REGION: String = std::env::var("S3_REGION").unwrap_or(String::new());
+    pub static ref S3_ENDPOINT: String = std::env::var("S3_ENDPOINT").expect("S3_ENDPOINT must be set");
+    pub static ref S3_BUCKET_NAME: String = std::env::var("S3_BUCKET_NAME").expect("S3_BUCKET_NAME must be set");
+    pub static ref S3_ACCESS_KEY: String = std::env::var("S3_ACCESS_KEY").expect("S3_ACCESS_KEY must be set");
+    pub static ref S3_SECRET_KEY: String = std::env::var("S3_SECRET_KEY").expect("S3_SECRET_KEY must be set");
+    pub static ref S3_BUCKET: Bucket = {    
+        let credentials = Credentials::new(
+            Some(&S3_ACCESS_KEY),
+            Some(&S3_SECRET_KEY),
+            None,
+            None,
+            None,
+        ).expect("Failed to create S3 credentials");
+        
+        let region = Region::Custom {
+            region: S3_REGION.clone(),
+            endpoint: S3_ENDPOINT.clone(),
+        };
+        
+        let bucket = *Bucket::new(&S3_BUCKET_NAME, region, credentials)
+            .expect("Failed to create S3 bucket");
+        bucket
     };
-    pub static ref S3_CREDENTIALS: Credentials =
-        Credentials::default().expect("Failed to get S3 credentials");
-    pub static ref USE_S3: bool =
-        env::var("CDN_S3_REGION").is_ok() && env::var("CDN_S3_ENDPOINT").is_ok();
-}
-
-pub fn get_s3_bucket(bucket: &str) -> Result<s3::Bucket> {
-    Ok(
-        *s3::Bucket::new(bucket, S3_REGION.clone(), S3_CREDENTIALS.clone())
-            .map_err(|_| Error::StorageError)?
-            .with_path_style(),
-    )
+    
+    pub static ref CLAMAV_HOST: String = std::env::var("CLAMAV_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    pub static ref CLAMAV_PORT: u16 = std::env::var("CLAMAV_PORT")
+        .unwrap_or_else(|_| "3310".to_string())
+        .parse::<u16>()
+        .expect("CLAMAV_PORT must be a valid port number");
+    
+    pub static ref BIND_ADDRESS: String = std::env::var("BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
+    
+    pub static ref MONGODB_URI: String = std::env::var("MONGODB_URI").expect("MONGODB_URI must be set");
+    pub static ref MONGODB_DATABASE: String = std::env::var("MONGODB_DATABASE").expect("MONGODB_DATABASE must be set");
+    pub static ref AS_MONGODB_DATABASE: String = std::env::var("AS_MONGODB_DATABASE").expect("AS_MONGODB_DATABASE must be set");
+    pub static ref FILE_TIMEOUT_HOURS: i64 = std::env::var("FILE_TIMEOUT_HOURS")
+        .unwrap_or_else(|_| "3".to_string())
+        .parse::<i64>()
+        .expect("FILE_TIMEOUT_HOURS must be a valid number");
 }
