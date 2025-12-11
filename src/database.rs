@@ -2,7 +2,7 @@ use anyhow::Result;
 use futures_util::StreamExt;
 use log::error;
 use mongodb::{Client, Collection, bson::{DateTime, doc}};
-use rand::Rng;
+use rand::{Rng, distr::Alphanumeric};
 use serde::{Deserialize, Serialize};
 
 use crate::{environment::{AS_MONGODB_DATABASE, FILE_TIMEOUT_HOURS, MONGODB_DATABASE}, get_time_millis};
@@ -49,8 +49,8 @@ impl FileDocument {
         size: u64,
         user_id: String,
     ) -> Self {        
-        let secret_key: String = rand::thread_rng()
-            .sample_iter(&rand::distributions::Alphanumeric)
+        let secret_key: String = rand::rng()
+            .sample_iter(&Alphanumeric)
             .take(32)
             .map(char::from)
             .collect();
