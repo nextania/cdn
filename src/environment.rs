@@ -41,4 +41,8 @@ lazy_static! {
         .unwrap_or_else(|_| "3".to_string())
         .parse::<i64>()
         .expect("FILE_TIMEOUT_HOURS must be a valid number");
+    pub static ref SIGNATURE_EXPIRY_SECONDS: u64 = std::env::var("SIGNATURE_EXPIRY_SECONDS")
+        .unwrap_or_else(|_| "3600".to_string())
+        .parse::<u64>()
+        .expect("SIGNATURE_EXPIRY_SECONDS must be a valid number");
 }
