@@ -2,7 +2,13 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub fn verify_signature(file_id: &str, secret_key: &str, signature: &str, timestamp: u64, expiry_seconds: u64) -> bool {
+pub fn verify_signature(
+    file_id: &str,
+    secret_key: &str,
+    signature: &str,
+    timestamp: u64,
+    expiry_seconds: u64,
+) -> bool {
     // validate this signature against the current time
     let current_time = SystemTime::now()
         .duration_since(UNIX_EPOCH)

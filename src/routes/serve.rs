@@ -2,7 +2,12 @@ use actix_web::{HttpResponse, Result as ActixResult, web};
 use log::{error, info, warn};
 use serde::Deserialize;
 
-use crate::{ErrorResponse, database::FileRepository, environment::{S3_BUCKET, SIGNATURE_EXPIRY_SECONDS}, signature};
+use crate::{
+    ErrorResponse,
+    database::FileRepository,
+    environment::{S3_BUCKET, SIGNATURE_EXPIRY_SECONDS},
+    signature,
+};
 
 #[derive(Deserialize)]
 pub struct FileServeQuery {
@@ -31,7 +36,13 @@ pub async fn serve_file(
             }));
         }
     };
-    if !signature::verify_signature(&file_id, &file_doc.signing_key, &query.signature, query.timestamp, *SIGNATURE_EXPIRY_SECONDS) {
+    if !signature::verify_signature(
+        &file_id,
+        &file_doc.signing_key,
+        &query.signature,
+        query.timestamp,
+        *SIGNATURE_EXPIRY_SECONDS,
+    ) {
         warn!("Invalid or expired signature for file: {}", file_id);
         return Ok(HttpResponse::Forbidden().json(ErrorResponse {
             error: "Invalid or expired signature".to_string(),

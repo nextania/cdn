@@ -110,8 +110,12 @@ pub async fn upload_file(req: HttpRequest, mut payload: Multipart) -> ActixResul
                 file_size,
                 user_id.clone(),
             );
-            let (signature, timestamp) = signature::generate_signature(&file_id, &file_doc.signing_key);
-            let serve_url = format!("/files/{}?signature={}&timestamp={}", file_id, signature, timestamp);
+            let (signature, timestamp) =
+                signature::generate_signature(&file_id, &file_doc.signing_key);
+            let serve_url = format!(
+                "/files/{}?signature={}&timestamp={}",
+                file_id, signature, timestamp
+            );
             if let Err(e) = FileRepository::insert_file(file_doc).await {
                 error!("Failed to save file metadata to MongoDB: {}", e);
                 // TODO: delete the file from S3 here to avoid orphaned files?
